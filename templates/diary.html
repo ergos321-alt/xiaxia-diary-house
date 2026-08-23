@@ -10,29 +10,49 @@
   <a class="primary-button new-entry-button" href="{{ url_for('diary.new_entry') }}"><span aria-hidden="true">＋</span> 写一篇</a>
 </section>
 
+<nav class="memory-strip" aria-label="翻旧日记快捷入口">
+  <a href="{{ url_for('diary.diary_archive') }}"><span aria-hidden="true">📖</span><span><strong>翻旧日记</strong><small>按月份或某一天找回去</small></span></a>
+  {% if has_on_this_day %}
+    <a href="{{ url_for('diary.on_this_day') }}"><span aria-hidden="true">🗓️</span><span><strong>一年前的今天</strong><small>那一天，我们留下过字</small></span></a>
+  {% endif %}
+  <a href="{{ url_for('diary.random_entry') }}"><span aria-hidden="true">🍃</span><span><strong>随机翻一页</strong><small>让一本旧日记自己打开</small></span></a>
+</nav>
+
+<nav class="author-browse" aria-label="按日记作者浏览">
+  <span>看看谁写下的日子</span>
+  <div>
+    <a class="{{ 'active' if not selected_author else '' }}" href="{{ url_for('diary.diary_home') }}"{% if not selected_author %} aria-current="page"{% endif %}>全部日记</a>
+    <a class="{{ 'active' if selected_author == 'user' else '' }}" href="{{ url_for('diary.diary_home', author='user') }}"{% if selected_author == 'user' %} aria-current="page"{% endif %}>🐶 我的日记</a>
+    <a class="{{ 'active' if selected_author == 'xiaxia' else '' }}" href="{{ url_for('diary.diary_home', author='xiaxia') }}"{% if selected_author == 'xiaxia' %} aria-current="page"{% endif %}>🐱 林知夏的日记</a>
+  </div>
+</nav>
+
 {% if entries %}
-  <section class="timeline" aria-label="日记列表">
+  <section class="timeline" aria-label="共同日记时间线">
     {% set ns = namespace(last_date=None) %}
     {% for entry in entries %}
       {% if ns.last_date != entry.entry_date %}
         <div class="date-divider">
-          <time datetime="{{ entry.entry_date.isoformat() }}">{{ entry.entry_date.strftime('%Y年%m月%d日') }}</time>
+          <time datetime="{{ entry.entry_date.isoformat() }}">{{ entry.entry_date.year }} 年 {{ entry.entry_date.month }} 月 {{ entry.entry_date.day }} 日</time>
         </div>
         {% set ns.last_date = entry.entry_date %}
       {% endif %}
       <article class="entry-card author-{{ entry.author }}">
+        <span class="timeline-stitch" aria-hidden="true"></span>
         <div class="entry-accent" aria-hidden="true"></div>
         <div class="entry-card-body">
           <div class="entry-meta">
-            <span class="author-chip">{{ '🐶 用户' if entry.author == 'user' else '🐱 林知夏' }}</span>
-            <time datetime="{{ entry.created_at.isoformat() }}">{{ entry.created_at.strftime('%H:%M') }}</time>
+            <span class="author-chip">{{ '🐶 我' if entry.author == 'user' else '🐱 林知夏' }}</span>
           </div>
-          <h2>{{ entry.title or ('用户的日记' if entry.author == 'user' else '林知夏的日记') }}</h2>
+          <h2>{{ entry.title or ('我写下的这一天' if entry.author == 'user' else '林知夏写下的这一天') }}</h2>
           <p class="entry-summary">{{ entry.content }}</p>
           <div class="entry-footer">
-            <span>{{ entry.reply_count }} 条回复</span>
-            <span>更新于 {{ entry.last_activity_at.strftime('%m-%d %H:%M') }}</span>
-            <a href="{{ url_for('diary.entry_detail', entry_id=entry.id) }}">读这一篇 <span aria-hidden="true">→</span></a>
+            <span>{{ entry.reply_count }} 句页边文字</span>
+            {% if entry.marks %}
+              <span class="marks-summary">🌿 {{ entry.marks|map(attribute='author')|map('replace', 'user', '我')|map('replace', 'xiaxia', '林知夏')|join('、') }}</span>
+            {% endif %}
+            <span>最近翻动 · {{ entry.last_activity_at.year }} 年 {{ entry.last_activity_at.month }} 月 {{ entry.last_activity_at.day }} 日</span>
+            <a href="{{ url_for('diary.entry_detail', entry_id=entry.id) }}">翻开这一页 <span aria-hidden="true">→</span></a>
           </div>
         </div>
       </article>
@@ -41,20 +61,26 @@
   {% if page > 1 or has_next %}
     <nav class="pagination" aria-label="日记翻页">
       {% if page > 1 %}
-        <a class="secondary-button" href="{{ url_for('diary.diary_home', page=page - 1) }}">← 更新的日记</a>
+        <a class="secondary-button" href="{{ url_for('diary.diary_home', page=page - 1, author=selected_author) }}">← 更新的日记</a>
       {% else %}<span></span>{% endif %}
       <span>第 {{ page }} 页</span>
       {% if has_next %}
-        <a class="secondary-button" href="{{ url_for('diary.diary_home', page=page + 1) }}">更早的日记 →</a>
+        <a class="secondary-button" href="{{ url_for('diary.diary_home', page=page + 1, author=selected_author) }}">更早的日记 →</a>
       {% endif %}
     </nav>
   {% endif %}
 {% else %}
   <section class="empty-state">
     <div aria-hidden="true">📖</div>
-    <h2>第一页还空着</h2>
-    <p>从一件今天想让林知夏记得的小事开始吧。</p>
-    <a class="primary-button" href="{{ url_for('diary.new_entry') }}">写下第一篇</a>
+    {% if selected_author %}
+      <h2>这一边暂时没有日记</h2>
+      <p>空着也没关系，可以回到共同时间线继续翻。</p>
+      <a class="secondary-button" href="{{ url_for('diary.diary_home') }}">看全部日记</a>
+    {% else %}
+      <h2>第一页还空着</h2>
+      <p>从一件今天想让林知夏记得的小事开始吧。</p>
+      <a class="primary-button" href="{{ url_for('diary.new_entry') }}">写下第一篇</a>
+    {% endif %}
   </section>
 {% endif %}
 

@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}翻旧日记 · Xiaxia Diary House{% endblock %}
+{% block content %}
+<section class="page-heading archive-heading">
+  <div>
+    <a class="back-link" href="{{ url_for('diary.diary_home') }}">← 共同时间线</a>
+    <p class="eyebrow">TURN BACK THE PAGES</p>
+    <h1>翻旧日记</h1>
+    <p class="muted">按月份慢慢翻，也可以直接回到某一天。</p>
+  </div>
+  <a class="secondary-button" href="{{ url_for('diary.random_entry') }}">🍃 随机翻一页</a>
+</section>
+
+<section class="archive-tools">
+  <div class="month-shelf">
+    <h2>按月份</h2>
+    {% if months %}
+      <div class="month-links">
+        {% for item in months %}
+          {% set parts = item.month.split('-') %}
+          <a class="{{ 'active' if calendar_month_value == item.month else '' }}" href="{{ url_for('diary.diary_archive', month=item.month) }}">
+            <strong>{{ parts[0] }} 年 {{ parts[1]|int }} 月</strong><small>{{ item.entry_count }} 篇</small>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">还没有可以翻阅的月份。</p>
+    {% endif %}
+  </div>
+  <div class="day-picker">
+    <h2>回到某一天</h2>
+    <form method="get" action="{{ url_for('diary.diary_archive') }}">
+      <label class="visually-hidden" for="archive-date">选择日期</label>
+      <input id="archive-date" type="date" name="date" value="{{ selected_date or '' }}" required>
+      <button class="primary-button" type="submit">翻到这一天</button>
+    </form>
+    {% if has_on_this_day %}
+      <a class="text-link" href="{{ url_for('diary.on_this_day') }}">🗓️ 翻到一年前的今天</a>
+    {% endif %}
+  </div>
+</section>
+
+<section class="calendar-card" aria-labelledby="calendar-title">
+  <header class="calendar-header">
+    <a href="{{ url_for('diary.diary_archive', month=previous_month) }}" aria-label="上一个月">←</a>
+    <div>
+      <p class="eyebrow">OUR CALENDAR</p>
+      <h2 id="calendar-title">{{ calendar_month.year }} 年 {{ calendar_month.month }} 月</h2>
+    </div>
+    <a href="{{ url_for('diary.diary_archive', month=next_month) }}" aria-label="下一个月">→</a>
+  </header>
+  <div class="calendar-weekdays" aria-hidden="true">
+    {% for label in ['一', '二', '三', '四', '五', '六', '日'] %}<span>{{ label }}</span>{% endfor %}
+  </div>
+  <div class="calendar-grid">
+    {% for week in calendar_weeks %}
+      {% for day in week %}
+        {% if day.in_month %}
+          <a class="calendar-day{{ ' has-entry' if day.entry_count else '' }}{{ ' selected' if selected_date == day.date.isoformat() else '' }}"
+             data-date="{{ day.date.isoformat() }}"
+             href="{{ url_for('diary.diary_archive', date=day.date.isoformat()) }}"
+             aria-label="{{ day.date.year }} 年 {{ day.date.month }} 月 {{ day.date.day }} 日{% if day.has_user and day.has_xiaxia %}，我和林知夏都写过{% elif day.has_user %}，我写过{% elif day.has_xiaxia %}，林知夏写过{% endif %}">
+            <span>{{ day.date.day }}</span>
+            <span class="calendar-traces" aria-hidden="true">
+              {% if day.has_user %}<i class="trace-user" data-author="user"></i>{% endif %}
+              {% if day.has_xiaxia %}<i class="trace-xiaxia" data-author="xiaxia"></i>{% endif %}
+            </span>
+          </a>
+        {% else %}
+          <span class="calendar-day outside" aria-hidden="true"><span>{{ day.date.day }}</span></span>
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+  </div>
+  <p class="calendar-legend"><span><i class="trace-user"></i> 🐶 我写过</span><span><i class="trace-xiaxia"></i> 🐱 林知夏写过</span></p>
+</section>
+
+{% if entries is not none %}
+  <section class="archive-results" aria-live="polite">
+    <div class="section-title"><h2>{{ heading }}</h2><span>{{ entries|length }} 篇</span></div>
+    {% if entries %}
+      <div class="archive-entry-list">
+        {% for entry in entries %}
+          <a class="archive-entry author-{{ entry.author }}" href="{{ url_for('diary.entry_detail', entry_id=entry.id) }}">
+            <time datetime="{{ entry.entry_date.isoformat() }}">{{ entry.entry_date.strftime('%m 月 %d 日') }}</time>
+            <span class="author-chip">{{ '🐶 我' if entry.author == 'user' else '🐱 林知夏' }}</span>
+            <strong>{{ entry.title or ('我写下的这一天' if entry.author == 'user' else '林知夏写下的这一天') }}</strong>
+            <small>{{ entry.reply_count }} 句页边文字{% if entry.marks %} · 🌿 有小痕迹{% endif %}</small>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="empty-state compact-empty">
+        <div aria-hidden="true">🍂</div>
+        <h2>{{ '这个月' if selected_month else '这一天' }}还没有留下日记</h2>
+        <p>空白就让它安静地空着，不会生成任何内容。</p>
+      </div>
+    {% endif %}
+  </section>
+{% endif %}
+{% endblock %}

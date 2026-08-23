@@ -14,10 +14,16 @@
       <span><strong>Xiaxia Diary House</strong><small>我们共同生活的记录</small></span>
     </a>
     {% if session.get('web_authenticated') %}
-      <form method="post" action="{{ url_for('logout') }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="quiet-button" type="submit">离开</button>
-      </form>
+      <div class="header-actions">
+        <nav class="header-nav" aria-label="日记导航">
+          <a href="{{ url_for('diary.diary_archive') }}">翻旧日记</a>
+          <a href="{{ url_for('diary.diary_trash') }}">废纸篓</a>
+        </nav>
+        <form method="post" action="{{ url_for('logout') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="quiet-button" type="submit">离开</button>
+        </form>
+      </div>
     {% endif %}
   </header>
 
@@ -38,4 +44,3 @@
   <script src="{{ url_for('static', filename='js/diary.js') }}" defer></script>
 </body>
 </html>
-

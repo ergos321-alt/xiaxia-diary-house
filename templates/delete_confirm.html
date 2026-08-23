@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}确认{{ '彻底删除' if permanent else '移入废纸篓' }} · Xiaxia Diary House{% endblock %}
+{% block content %}
+<section class="confirm-card">
+  <p class="eyebrow">PLEASE CHECK THIS PAGE</p>
+  <h1>{{ '要彻底删除这一页吗？' if permanent else '要把这一页移入废纸篓吗？' }}</h1>
+  <div class="confirm-entry">
+    <span class="author-chip">🐶 我</span>
+    <strong>{{ entry.title or '我写下的这一天' }}</strong>
+    <time datetime="{{ entry.entry_date.isoformat() }}">{{ entry.entry_date.strftime('%Y 年 %m 月 %d 日') }}</time>
+  </div>
+  {% if permanent %}
+    <p class="warning-text">彻底删除后，正文、页边文字和小标记都会一并删除，无法恢复。</p>
+  {% else %}
+    <p class="muted">移入后不会出现在普通时间线和 Action 读取结果中，但仍可从废纸篓恢复。</p>
+  {% endif %}
+  <form class="confirm-actions" method="post" action="{{ url_for('diary.permanently_delete_entry' if permanent else 'diary.trash_entry', entry_id=entry.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <a class="secondary-button" href="{{ url_for('diary.diary_trash') if permanent else url_for('diary.entry_detail', entry_id=entry.id) }}">先不删</a>
+    <button class="{{ 'danger-button' if permanent else 'primary-button' }}" type="submit">{{ '确认彻底删除' if permanent else '确认移入废纸篓' }}</button>
+  </form>
+</section>
+{% endblock %}

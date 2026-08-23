@@ -8,8 +8,43 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 
+ENTRY_SELECT = """
+    SELECT e.id, e.author, e.title, e.content, e.entry_date,
+           e.created_at, e.updated_at, e.deleted_at, e.deleted_by,
+           (SELECT COUNT(*)::int
+              FROM diary_replies r
+             WHERE r.entry_id = e.id) AS reply_count,
+           COALESCE(
+               (SELECT jsonb_agg(
+                           jsonb_build_object(
+                               'id', m.id,
+                               'entry_id', m.entry_id,
+                               'author', m.author,
+                               'mark_type', m.mark_type,
+                               'created_at', m.created_at
+                           ) ORDER BY m.created_at ASC
+                       )
+                  FROM diary_marks m
+                 WHERE m.entry_id = e.id),
+               '[]'::jsonb
+           ) AS marks,
+           GREATEST(
+               e.updated_at,
+               COALESCE(
+                   (SELECT MAX(r.updated_at) FROM diary_replies r WHERE r.entry_id = e.id),
+                   e.updated_at
+               ),
+               COALESCE(
+                   (SELECT MAX(m.created_at) FROM diary_marks m WHERE m.entry_id = e.id),
+                   e.updated_at
+               )
+           ) AS last_activity_at
+      FROM diary_entries e
+"""
+
+
 class Database:
-    """Small PostgreSQL repository. It never generates diary content."""
+    """Small PostgreSQL repository. It stores facts and never generates diary text."""
 
     def __init__(self, database_url: str) -> None:
         if not database_url:
@@ -38,7 +73,7 @@ class Database:
         start_date: date | None = None,
         end_date: date | None = None,
     ) -> list[dict[str, Any]]:
-        conditions: list[str] = []
+        conditions = ["e.deleted_at IS NULL"]
         params: list[Any] = []
         if author:
             conditions.append("e.author = %s")
@@ -49,35 +84,84 @@ class Database:
         if end_date:
             conditions.append("e.entry_date <= %s")
             params.append(end_date)
-        where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         params.extend((limit, offset))
         query = f"""
-            SELECT e.id, e.author, e.title, e.content, e.entry_date,
-                   e.created_at, e.updated_at,
-                   COUNT(r.id)::int AS reply_count,
-                   GREATEST(e.updated_at, COALESCE(MAX(r.updated_at), e.updated_at)) AS last_activity_at
-            FROM diary_entries e
-            LEFT JOIN diary_replies r ON r.entry_id = e.id
-            {where_sql}
-            GROUP BY e.id
+            {ENTRY_SELECT}
+            WHERE {' AND '.join(conditions)}
             ORDER BY e.entry_date DESC, e.created_at DESC
             LIMIT %s OFFSET %s
         """
         with self.pool.connection() as conn:
             return list(conn.execute(query, params).fetchall())
 
-    def get_entry(self, entry_id: UUID) -> dict[str, Any] | None:
+    def list_deleted_entries(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        query = f"""
+            {ENTRY_SELECT}
+            WHERE e.deleted_at IS NOT NULL AND e.author = 'user'
+            ORDER BY e.deleted_at DESC
+            LIMIT %s
+        """
+        with self.pool.connection() as conn:
+            return list(conn.execute(query, (limit,)).fetchall())
+
+    def list_months(self) -> list[dict[str, Any]]:
+        with self.pool.connection() as conn:
+            return list(
+                conn.execute(
+                    """
+                    SELECT to_char(entry_date, 'YYYY-MM') AS month,
+                           COUNT(*)::int AS entry_count
+                    FROM diary_entries
+                    WHERE deleted_at IS NULL
+                    GROUP BY to_char(entry_date, 'YYYY-MM')
+                    ORDER BY month DESC
+                    """
+                ).fetchall()
+            )
+
+    def list_calendar_days(
+        self, *, start_date: date, end_date: date
+    ) -> list[dict[str, Any]]:
+        with self.pool.connection() as conn:
+            return list(
+                conn.execute(
+                    """
+                    SELECT entry_date,
+                           bool_or(author = 'user') AS has_user,
+                           bool_or(author = 'xiaxia') AS has_xiaxia,
+                           COUNT(*)::int AS entry_count
+                    FROM diary_entries
+                    WHERE deleted_at IS NULL
+                      AND entry_date >= %s
+                      AND entry_date <= %s
+                    GROUP BY entry_date
+                    ORDER BY entry_date ASC
+                    """,
+                    (start_date, end_date),
+                ).fetchall()
+            )
+
+    def random_entry(self) -> dict[str, Any] | None:
+        with self.pool.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT id FROM diary_entries
+                WHERE deleted_at IS NULL
+                ORDER BY random()
+                LIMIT 1
+                """
+            ).fetchone()
+        return self.get_entry(row["id"]) if row else None
+
+    def get_entry(
+        self, entry_id: UUID, *, include_deleted: bool = False
+    ) -> dict[str, Any] | None:
+        deleted_clause = "" if include_deleted else "AND e.deleted_at IS NULL"
         with self.pool.connection() as conn:
             entry = conn.execute(
-                """
-                SELECT e.id, e.author, e.title, e.content, e.entry_date,
-                       e.created_at, e.updated_at,
-                       COUNT(r.id)::int AS reply_count,
-                       GREATEST(e.updated_at, COALESCE(MAX(r.updated_at), e.updated_at)) AS last_activity_at
-                FROM diary_entries e
-                LEFT JOIN diary_replies r ON r.entry_id = e.id
-                WHERE e.id = %s
-                GROUP BY e.id
+                f"""
+                {ENTRY_SELECT}
+                WHERE e.id = %s {deleted_clause}
                 """,
                 (entry_id,),
             ).fetchone()
@@ -104,7 +188,8 @@ class Database:
                 """
                 INSERT INTO diary_entries (author, title, content, entry_date)
                 VALUES (%s, %s, %s, %s)
-                RETURNING id, author, title, content, entry_date, created_at, updated_at
+                RETURNING id, author, title, content, entry_date, created_at,
+                          updated_at, deleted_at, deleted_by
                 """,
                 (author, title, content, entry_date),
             ).fetchone()
@@ -112,6 +197,7 @@ class Database:
             assert row is not None
             row["reply_count"] = 0
             row["replies"] = []
+            row["marks"] = []
             row["last_activity_at"] = row["updated_at"]
             return row
 
@@ -123,7 +209,7 @@ class Database:
                 """
                 UPDATE diary_entries
                 SET title = %s, content = %s, entry_date = %s, updated_at = now()
-                WHERE id = %s AND author = 'user'
+                WHERE id = %s AND author = 'user' AND deleted_at IS NULL
                 RETURNING id, author, title, content, entry_date, created_at, updated_at
                 """,
                 (title, content, entry_date, entry_id),
@@ -136,7 +222,8 @@ class Database:
     ) -> dict[str, Any] | None:
         with self.pool.connection() as conn:
             exists = conn.execute(
-                "SELECT 1 FROM diary_entries WHERE id = %s", (entry_id,)
+                "SELECT 1 FROM diary_entries WHERE id = %s AND deleted_at IS NULL",
+                (entry_id,),
             ).fetchone()
             if exists is None:
                 return None
@@ -160,9 +247,101 @@ class Database:
                            e.author AS entry_author, e.title AS entry_title, e.entry_date
                     FROM diary_replies r
                     JOIN diary_entries e ON e.id = r.entry_id
+                    WHERE e.deleted_at IS NULL
                     ORDER BY r.created_at DESC
                     LIMIT %s
                     """,
                     (limit,),
                 ).fetchall()
             )
+
+    def add_mark(
+        self, *, entry_id: UUID, author: str, mark_type: str
+    ) -> tuple[dict[str, Any] | None, bool]:
+        with self.pool.connection() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM diary_entries WHERE id = %s AND deleted_at IS NULL",
+                (entry_id,),
+            ).fetchone()
+            if exists is None:
+                return None, False
+            row = conn.execute(
+                """
+                INSERT INTO diary_marks (entry_id, author, mark_type)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (entry_id, author, mark_type) DO NOTHING
+                RETURNING id, entry_id, author, mark_type, created_at
+                """,
+                (entry_id, author, mark_type),
+            ).fetchone()
+            created = row is not None
+            if row is None:
+                row = conn.execute(
+                    """
+                    SELECT id, entry_id, author, mark_type, created_at
+                    FROM diary_marks
+                    WHERE entry_id = %s AND author = %s AND mark_type = %s
+                    """,
+                    (entry_id, author, mark_type),
+                ).fetchone()
+            conn.commit()
+            return row, created
+
+    def remove_mark(self, *, entry_id: UUID, author: str, mark_type: str) -> bool:
+        with self.pool.connection() as conn:
+            row = conn.execute(
+                """
+                DELETE FROM diary_marks m
+                USING diary_entries e
+                WHERE m.entry_id = e.id
+                  AND m.entry_id = %s
+                  AND m.author = %s
+                  AND m.mark_type = %s
+                  AND e.deleted_at IS NULL
+                RETURNING m.id
+                """,
+                (entry_id, author, mark_type),
+            ).fetchone()
+            conn.commit()
+            return row is not None
+
+    def trash_user_entry(self, entry_id: UUID) -> bool:
+        with self.pool.connection() as conn:
+            row = conn.execute(
+                """
+                UPDATE diary_entries
+                SET deleted_at = now(), deleted_by = 'user', updated_at = now()
+                WHERE id = %s AND author = 'user' AND deleted_at IS NULL
+                RETURNING id
+                """,
+                (entry_id,),
+            ).fetchone()
+            conn.commit()
+            return row is not None
+
+    def restore_user_entry(self, entry_id: UUID) -> bool:
+        with self.pool.connection() as conn:
+            row = conn.execute(
+                """
+                UPDATE diary_entries
+                SET deleted_at = NULL, deleted_by = NULL, updated_at = now()
+                WHERE id = %s AND author = 'user' AND deleted_at IS NOT NULL
+                RETURNING id
+                """,
+                (entry_id,),
+            ).fetchone()
+            conn.commit()
+            return row is not None
+
+    def permanently_delete_user_entry(self, entry_id: UUID) -> bool:
+        with self.pool.connection() as conn:
+            row = conn.execute(
+                """
+                DELETE FROM diary_entries
+                WHERE id = %s AND author = 'user' AND deleted_at IS NOT NULL
+                RETURNING id
+                """,
+                (entry_id,),
+            ).fetchone()
+            conn.commit()
+            return row is not None

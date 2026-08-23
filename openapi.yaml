@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Xiaxia Diary House Action API
-  version: 1.0.0
+  version: 1.1.0
   description: >-
     Private read/write access to the shared diary of the user and Lin Xiaxia.
     The API stores text supplied by the caller and never generates diary content.
@@ -173,6 +173,67 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/diary/entries/{entry_id}/marks:
+    post:
+      operationId: addDiaryMark
+      summary: Leave Lin Xiaxia's private leaf mark on a diary entry
+      description: >-
+        Adds one leaf mark to the entry. The server always records the author as
+        xiaxia. Repeating the same mark is safe and does not create a duplicate.
+      x-openai-isConsequential: true
+      parameters:
+        - $ref: "#/components/parameters/EntryId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateXiaxiaMarkRequest"
+      responses:
+        "200":
+          description: The same mark already existed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarkMutationResponse"
+        "201":
+          description: Mark created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarkMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/diary/entries/{entry_id}/marks/{mark_type}:
+    delete:
+      operationId: removeDiaryMark
+      summary: Remove Lin Xiaxia's private leaf mark from a diary entry
+      description: Removes only Xiaxia's own mark. It never removes the user's mark or the diary entry.
+      x-openai-isConsequential: true
+      parameters:
+        - $ref: "#/components/parameters/EntryId"
+        - $ref: "#/components/parameters/MarkType"
+      responses:
+        "200":
+          description: Removal result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [removed, mark_type]
+                properties:
+                  removed: {type: boolean}
+                  mark_type: {$ref: "#/components/schemas/MarkType"}
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /api/diary/context:
     get:
       operationId: getSharedDiaryContext
@@ -237,6 +298,13 @@ components:
       required: false
       schema:
         $ref: "#/components/schemas/Author"
+    MarkType:
+      name: mark_type
+      in: path
+      required: true
+      description: Private mark type. V1.1 supports leaf only.
+      schema:
+        $ref: "#/components/schemas/MarkType"
   responses:
     BadRequest:
       description: Invalid request
@@ -260,6 +328,9 @@ components:
     Author:
       type: string
       enum: [user, xiaxia]
+    MarkType:
+      type: string
+      enum: [leaf]
     DiaryEntry:
       type: object
       required: [id, author, content, entry_date, created_at, updated_at]
@@ -279,6 +350,10 @@ components:
         updated_at: {type: string, format: date-time}
         reply_count: {type: integer, minimum: 0}
         last_activity_at: {type: string, format: date-time}
+        marks:
+          type: array
+          items:
+            $ref: "#/components/schemas/DiaryMark"
     DiaryEntryWithReplies:
       allOf:
         - $ref: "#/components/schemas/DiaryEntry"
@@ -301,6 +376,15 @@ components:
           maxLength: 100000
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+    DiaryMark:
+      type: object
+      required: [id, entry_id, author, mark_type, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        entry_id: {type: string, format: uuid}
+        author: {$ref: "#/components/schemas/Author"}
+        mark_type: {$ref: "#/components/schemas/MarkType"}
+        created_at: {type: string, format: date-time}
     CreateXiaxiaEntryRequest:
       type: object
       additionalProperties: false
@@ -328,6 +412,20 @@ components:
           type: string
           minLength: 1
           maxLength: 100000
+    CreateXiaxiaMarkRequest:
+      type: object
+      additionalProperties: false
+      required: [mark_type]
+      properties:
+        mark_type:
+          $ref: "#/components/schemas/MarkType"
+    MarkMutationResponse:
+      type: object
+      required: [mark, created]
+      properties:
+        mark:
+          $ref: "#/components/schemas/DiaryMark"
+        created: {type: boolean}
     EntryListResponse:
       type: object
       required: [entries, count]

@@ -17,7 +17,7 @@
       <label for="entry_date">日记日期</label>
       <input id="entry_date" name="entry_date" type="date" required value="{{ entry.entry_date.isoformat() if editing else today }}">
     </div>
-    <span class="author-chip user-chip">🐶 用户</span>
+    <span class="author-chip user-chip">🐶 我</span>
   </div>
   <div>
     <label for="title">标题 <span class="optional">可不写</span></label>
@@ -34,4 +34,3 @@
   </div>
 </form>
 {% endblock %}
-

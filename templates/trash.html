@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}废纸篓 · Xiaxia Diary House{% endblock %}
+{% block content %}
+<section class="page-heading compact-heading">
+  <div>
+    <a class="back-link" href="{{ url_for('diary.diary_home') }}">← 共同时间线</a>
+    <p class="eyebrow">WASTEPAPER BASKET</p>
+    <h1>废纸篓</h1>
+    <p class="muted">这里只放我移走的日记。恢复之前，它们不会出现在时间线或 Action 读取结果中。</p>
+  </div>
+</section>
+
+{% if entries %}
+  <section class="trash-list">
+    {% for entry in entries %}
+      <article class="trash-entry">
+        <div>
+          <span class="author-chip">🐶 我</span>
+          <h2>{{ entry.title or '我写下的这一天' }}</h2>
+          <p>{{ entry.entry_date.strftime('%Y 年 %m 月 %d 日') }} · 移入于 {{ entry.deleted_at.strftime('%m-%d %H:%M') }}</p>
+        </div>
+        <div class="trash-actions">
+          <form method="post" action="{{ url_for('diary.restore_entry', entry_id=entry.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="secondary-button" type="submit">恢复</button>
+          </form>
+          <a class="danger-link" href="{{ url_for('diary.confirm_permanent_delete', entry_id=entry.id) }}">彻底删除</a>
+        </div>
+      </article>
+    {% endfor %}
+  </section>
+{% else %}
+  <section class="empty-state compact-empty">
+    <div aria-hidden="true">🧺</div>
+    <h2>废纸篓是空的</h2>
+    <p>没有被移走的日记。</p>
+  </section>
+{% endif %}
+{% endblock %}
