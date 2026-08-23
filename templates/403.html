@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}不能修改 · Xiaxia Diary House{% endblock %}
+{% block content %}
+<section class="empty-state"><div>🔒</div><h1>这篇不能由网页修改</h1><p>林知夏的日记只能由她本人通过 Action 写入。</p><a class="primary-button" href="{{ url_for('diary.diary_home') }}">回到日记</a></section>
+{% endblock %}
+

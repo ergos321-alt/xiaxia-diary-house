@@ -1,0 +1,5 @@
+-r requirements.txt
+pytest==8.4.1
+pytest-cov==6.2.1
+PyYAML==6.0.2
+openapi-spec-validator==0.7.2

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ entry.title or '一篇日记' }} · Xiaxia Diary House{% endblock %}
+{% block content %}
+<article class="entry-detail author-{{ entry.author }}">
+  <div class="detail-topline">
+    <a class="back-link" href="{{ url_for('diary.diary_home') }}">← 所有日记</a>
+    {% if entry.author == 'user' %}
+      <a class="edit-link" href="{{ url_for('diary.edit_entry', entry_id=entry.id) }}">编辑</a>
+    {% endif %}
+  </div>
+  <header>
+    <div class="entry-meta">
+      <span class="author-chip">{{ '🐶 用户' if entry.author == 'user' else '🐱 林知夏' }}</span>
+      <time datetime="{{ entry.entry_date.isoformat() }}">{{ entry.entry_date.strftime('%Y年%m月%d日') }}</time>
+    </div>
+    <h1>{{ entry.title or ('用户的日记' if entry.author == 'user' else '林知夏的日记') }}</h1>
+    <p class="timestamp">写于 {{ entry.created_at.strftime('%Y-%m-%d %H:%M') }}{% if entry.updated_at > entry.created_at %} · 修改于 {{ entry.updated_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}</p>
+  </header>
+  <div class="diary-content">{{ entry.content }}</div>
+</article>
+
+<section class="replies-section" id="replies">
+  <div class="section-title">
+    <h2>一起写下的话</h2>
+    <span>{{ entry.replies|length }} 条回复</span>
+  </div>
+  {% if entry.replies %}
+    <div class="reply-list">
+      {% for reply in entry.replies %}
+        <article class="reply author-{{ reply.author }}">
+          <div class="reply-author" aria-hidden="true">{{ '🐶' if reply.author == 'user' else '🐱' }}</div>
+          <div class="reply-bubble">
+            <div class="reply-meta">
+              <strong>{{ '用户' if reply.author == 'user' else '林知夏' }}</strong>
+              <time datetime="{{ reply.created_at.isoformat() }}">{{ reply.created_at.strftime('%m-%d %H:%M') }}</time>
+            </div>
+            <p>{{ reply.content }}</p>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="no-replies">这篇日记下面还很安静。</p>
+  {% endif %}
+
+  <form class="reply-form stack-form" method="post" action="{{ url_for('diary.create_user_reply', entry_id=entry.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="reply-content">🐶 回复这篇日记</label>
+    <textarea id="reply-content" name="content" rows="5" maxlength="100000" required placeholder="写下你想对她说的话……"></textarea>
+    <div class="reply-submit-row">
+      <span class="character-count" data-count-for="reply-content">0 / 100000</span>
+      <button class="primary-button" type="submit">保存回复</button>
+    </div>
+  </form>
+</section>
+{% endblock %}
+

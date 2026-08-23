@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f8f2ea">
+  <title>{% block title %}Xiaxia Diary House{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="{{ url_for('diary.diary_home') }}" aria-label="回到共同日记主页">
+      <span class="brand-mark" aria-hidden="true">🐶<i></i>🐱</span>
+      <span><strong>Xiaxia Diary House</strong><small>我们共同生活的记录</small></span>
+    </a>
+    {% if session.get('web_authenticated') %}
+      <form method="post" action="{{ url_for('logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="quiet-button" type="submit">离开</button>
+      </form>
+    {% endif %}
+  </header>
+
+  <main class="page-shell">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-stack" aria-live="polite">
+          {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">只属于 🐶 与 🐱 的一本日记</footer>
+  <script src="{{ url_for('static', filename='js/diary.js') }}" defer></script>
+</body>
+</html>
+

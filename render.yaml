@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: xiaxia-diary-house
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn "app:create_app()" --bind 0.0.0:$PORT --workers 2 --threads 4 --timeout 60 --access-logfile -
+    healthCheckPath: /healthz
+    autoDeploy: false
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.5
+      - key: APP_TIMEZONE
+        value: Asia/Shanghai
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      - key: DATABASE_URL
+        sync: false
+      - key: WEB_PASSWORD
+        sync: false
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: DIARY_API_TOKEN
+        generateValue: true
+

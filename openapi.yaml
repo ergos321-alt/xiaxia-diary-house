@@ -1,0 +1,360 @@
+openapi: 3.1.0
+info:
+  title: Xiaxia Diary House Action API
+  version: 1.0.0
+  description: >-
+    Private read/write access to the shared diary of the user and Lin Xiaxia.
+    The API stores text supplied by the caller and never generates diary content.
+servers:
+  - url: https://replace-with-render-service.onrender.com
+    description: Replace this complete URL with the real Render service URL before importing the schema.
+security:
+  - bearerAuth: []
+paths:
+  /api/diary/recent:
+    get:
+      operationId: getRecentDiaryEntries
+      summary: Read the most recent diary entries
+      description: Returns bounded recent entries in reverse chronological order, including their content.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/AuthorFilter"
+      responses:
+        "200":
+          description: Recent diary entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntryListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/diary/entries/{entry_id}:
+    get:
+      operationId: getDiaryEntry
+      summary: Read one complete diary entry and all replies
+      parameters:
+        - $ref: "#/components/parameters/EntryId"
+      responses:
+        "200":
+          description: Complete diary entry
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entry]
+                properties:
+                  entry:
+                    $ref: "#/components/schemas/DiaryEntryWithReplies"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/diary/by-date:
+    get:
+      operationId: getDiaryEntriesByDate
+      summary: Read diary entries from one day or a date range
+      description: >-
+        Supply date by itself, or both start_date and end_date. Do not combine the two forms.
+        A range can cover at most 366 days.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          description: One diary date.
+          schema:
+            type: string
+            format: date
+        - name: start_date
+          in: query
+          required: false
+          description: Inclusive range start.
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          required: false
+          description: Inclusive range end.
+          schema:
+            type: string
+            format: date
+        - $ref: "#/components/parameters/AuthorFilter"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+      responses:
+        "200":
+          description: Entries within the requested date range
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/EntryListResponse"
+                  - type: object
+                    required: [range]
+                    properties:
+                      range:
+                        type: object
+                        required: [start_date, end_date]
+                        properties:
+                          start_date: {type: string, format: date}
+                          end_date: {type: string, format: date}
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/diary/entries:
+    post:
+      operationId: createDiaryEntry
+      summary: Create a diary entry written by Lin Xiaxia
+      description: >-
+        Store exactly the caller-supplied diary text. The server always records the
+        author as xiaxia; the request cannot choose or override the author.
+        The server does not generate or rewrite the content.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateXiaxiaEntryRequest"
+      responses:
+        "201":
+          description: Diary entry created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entry]
+                properties:
+                  entry:
+                    $ref: "#/components/schemas/DiaryEntryWithReplies"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/diary/entries/{entry_id}/replies:
+    post:
+      operationId: replyToDiaryEntry
+      summary: Add a reply written by Lin Xiaxia to an existing diary entry
+      description: >-
+        Store exactly the caller-supplied reply text. The server always records the
+        author as xiaxia; the request cannot choose or override the author.
+      parameters:
+        - $ref: "#/components/parameters/EntryId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateXiaxiaReplyRequest"
+      responses:
+        "201":
+          description: Reply created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reply]
+                properties:
+                  reply:
+                    $ref: "#/components/schemas/DiaryReply"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/diary/context:
+    get:
+      operationId: getSharedDiaryContext
+      summary: Get bounded recent context for both diary authors
+      description: Returns recent user entries, recent Xiaxia entries, and recent replies without returning unlimited history.
+      parameters:
+        - name: per_author
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10
+            default: 5
+        - name: reply_limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 10
+      responses:
+        "200":
+          description: Recent shared diary context
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContextResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-token
+      description: Use the DIARY_API_TOKEN value stored privately in Render and Custom GPT Authentication settings.
+  parameters:
+    EntryId:
+      name: entry_id
+      in: path
+      required: true
+      description: Diary entry UUID.
+      schema:
+        type: string
+        format: uuid
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 10
+    AuthorFilter:
+      name: author
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/Author"
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Missing or invalid Bearer token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Diary entry not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Author:
+      type: string
+      enum: [user, xiaxia]
+    DiaryEntry:
+      type: object
+      required: [id, author, content, entry_date, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        author: {$ref: "#/components/schemas/Author"}
+        title:
+          anyOf:
+            - type: string
+              maxLength: 200
+            - type: "null"
+        content:
+          type: string
+          maxLength: 100000
+        entry_date: {type: string, format: date}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        reply_count: {type: integer, minimum: 0}
+        last_activity_at: {type: string, format: date-time}
+    DiaryEntryWithReplies:
+      allOf:
+        - $ref: "#/components/schemas/DiaryEntry"
+        - type: object
+          required: [replies]
+          properties:
+            replies:
+              type: array
+              items:
+                $ref: "#/components/schemas/DiaryReply"
+    DiaryReply:
+      type: object
+      required: [id, entry_id, author, content, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        entry_id: {type: string, format: uuid}
+        author: {$ref: "#/components/schemas/Author"}
+        content:
+          type: string
+          maxLength: 100000
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    CreateXiaxiaEntryRequest:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        title:
+          anyOf:
+            - type: string
+              maxLength: 200
+            - type: "null"
+        content:
+          type: string
+          minLength: 1
+          maxLength: 100000
+        entry_date:
+          type: string
+          format: date
+          description: Defaults to the configured APP_TIMEZONE current date when omitted.
+    CreateXiaxiaReplyRequest:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 100000
+    EntryListResponse:
+      type: object
+      required: [entries, count]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/DiaryEntry"
+        count: {type: integer, minimum: 0}
+    ContextResponse:
+      type: object
+      required: [generated_at, timezone, recent_user_entries, recent_xiaxia_entries, recent_replies]
+      properties:
+        generated_at: {type: string, format: date-time}
+        timezone: {type: string}
+        recent_user_entries:
+          type: array
+          items: {$ref: "#/components/schemas/DiaryEntry"}
+        recent_xiaxia_entries:
+          type: array
+          items: {$ref: "#/components/schemas/DiaryEntry"}
+        recent_replies:
+          type: array
+          items: {$ref: "#/components/schemas/DiaryReply"}
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error: {type: string}
+        message: {type: string}

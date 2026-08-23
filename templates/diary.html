@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}共同日记 · Xiaxia Diary House{% endblock %}
+{% block content %}
+<section class="page-heading home-heading">
+  <div>
+    <p class="eyebrow">OUR DAYS, KEPT TOGETHER</p>
+    <h1>共同日记</h1>
+    <p class="muted">写下今天，也回到我们走过的任何一天。</p>
+  </div>
+  <a class="primary-button new-entry-button" href="{{ url_for('diary.new_entry') }}"><span aria-hidden="true">＋</span> 写一篇</a>
+</section>
+
+{% if entries %}
+  <section class="timeline" aria-label="日记列表">
+    {% set ns = namespace(last_date=None) %}
+    {% for entry in entries %}
+      {% if ns.last_date != entry.entry_date %}
+        <div class="date-divider">
+          <time datetime="{{ entry.entry_date.isoformat() }}">{{ entry.entry_date.strftime('%Y年%m月%d日') }}</time>
+        </div>
+        {% set ns.last_date = entry.entry_date %}
+      {% endif %}
+      <article class="entry-card author-{{ entry.author }}">
+        <div class="entry-accent" aria-hidden="true"></div>
+        <div class="entry-card-body">
+          <div class="entry-meta">
+            <span class="author-chip">{{ '🐶 用户' if entry.author == 'user' else '🐱 林知夏' }}</span>
+            <time datetime="{{ entry.created_at.isoformat() }}">{{ entry.created_at.strftime('%H:%M') }}</time>
+          </div>
+          <h2>{{ entry.title or ('用户的日记' if entry.author == 'user' else '林知夏的日记') }}</h2>
+          <p class="entry-summary">{{ entry.content }}</p>
+          <div class="entry-footer">
+            <span>{{ entry.reply_count }} 条回复</span>
+            <span>更新于 {{ entry.last_activity_at.strftime('%m-%d %H:%M') }}</span>
+            <a href="{{ url_for('diary.entry_detail', entry_id=entry.id) }}">读这一篇 <span aria-hidden="true">→</span></a>
+          </div>
+        </div>
+      </article>
+    {% endfor %}
+  </section>
+  {% if page > 1 or has_next %}
+    <nav class="pagination" aria-label="日记翻页">
+      {% if page > 1 %}
+        <a class="secondary-button" href="{{ url_for('diary.diary_home', page=page - 1) }}">← 更新的日记</a>
+      {% else %}<span></span>{% endif %}
+      <span>第 {{ page }} 页</span>
+      {% if has_next %}
+        <a class="secondary-button" href="{{ url_for('diary.diary_home', page=page + 1) }}">更早的日记 →</a>
+      {% endif %}
+    </nav>
+  {% endif %}
+{% else %}
+  <section class="empty-state">
+    <div aria-hidden="true">📖</div>
+    <h2>第一页还空着</h2>
+    <p>从一件今天想让林知夏记得的小事开始吧。</p>
+    <a class="primary-button" href="{{ url_for('diary.new_entry') }}">写下第一篇</a>
+  </section>
+{% endif %}
+
+<a class="floating-write" href="{{ url_for('diary.new_entry') }}" aria-label="写一篇新日记">＋</a>
+{% endblock %}

@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}暂时无法打开 · Xiaxia Diary House{% endblock %}
+{% block content %}
+<section class="empty-state"><div>🕯️</div><h1>暂时无法完成</h1><p>{{ message }}</p><a class="primary-button" href="{{ url_for('diary.diary_home') }}">回到日记</a></section>
+{% endblock %}
+

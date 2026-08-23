@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}回家 · Xiaxia Diary House{% endblock %}
+{% block content %}
+<section class="login-card">
+  <div class="door-sign" aria-hidden="true">🐶 · 🐱</div>
+  <p class="eyebrow">PRIVATE DIARY</p>
+  <h1>回到我们的小房子</h1>
+  <p class="muted">这里保存两个人写下的日子。请输入私人访问口令。</p>
+  <form method="post" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label for="password">私人访问口令</label>
+    <input id="password" name="password" type="password" required autocomplete="current-password" autofocus>
+    <button class="primary-button" type="submit">开门</button>
+  </form>
+</section>
+{% endblock %}
+

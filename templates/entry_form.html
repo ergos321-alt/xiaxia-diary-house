@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% set editing = entry and entry.id is defined %}
+{% block title %}{{ '编辑日记' if editing else '写日记' }} · Xiaxia Diary House{% endblock %}
+{% block content %}
+<section class="page-heading compact-heading">
+  <div>
+    <a class="back-link" href="{{ url_for('diary.entry_detail', entry_id=entry.id) if editing else url_for('diary.diary_home') }}">← 返回</a>
+    <p class="eyebrow">{{ 'EDIT YOUR ENTRY' if editing else 'A NEW PAGE' }}</p>
+    <h1>{{ '修改这一天' if editing else '今天想留下什么？' }}</h1>
+  </div>
+</section>
+
+<form class="editor-card stack-form" method="post" action="{{ url_for('diary.update_entry', entry_id=entry.id) if editing else url_for('diary.create_user_entry') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="field-row">
+    <div>
+      <label for="entry_date">日记日期</label>
+      <input id="entry_date" name="entry_date" type="date" required value="{{ entry.entry_date.isoformat() if editing else today }}">
+    </div>
+    <span class="author-chip user-chip">🐶 用户</span>
+  </div>
+  <div>
+    <label for="title">标题 <span class="optional">可不写</span></label>
+    <input id="title" name="title" type="text" maxlength="200" placeholder="给这一天取个名字" value="{{ entry.title or '' if entry else '' }}">
+  </div>
+  <div>
+    <label for="content">正文</label>
+    <textarea id="content" name="content" required maxlength="100000" rows="14" placeholder="慢慢写，我们会把它好好保存下来。">{{ entry.content if entry else '' }}</textarea>
+    <div class="character-count" data-count-for="content">0 / 100000</div>
+  </div>
+  <div class="form-actions">
+    <a class="secondary-button" href="{{ url_for('diary.entry_detail', entry_id=entry.id) if editing else url_for('diary.diary_home') }}">取消</a>
+    <button class="primary-button" type="submit">{{ '保存修改' if editing else '保存日记' }}</button>
+  </div>
+</form>
+{% endblock %}
+
