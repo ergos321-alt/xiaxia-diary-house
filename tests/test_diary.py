@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from uuid import uuid4
 
 import diary as diary_module
 
@@ -106,9 +107,32 @@ def test_api_xiaxia_create_recent_get_and_reply(client, repo, api_headers):
     entry_id = created.json["entry"]["id"]
     assert created.json["entry"]["author"] == "xiaxia"
 
-    recent = client.get("/api/diary/recent?limit=5&author=xiaxia", headers=api_headers)
+    recent = client.get(
+        "/api/diary/recent?page=1&page_size=5&author=xiaxia", headers=api_headers
+    )
     assert recent.status_code == 200
-    assert recent.json["entries"][0]["content"] == "由林知夏本人写下。"
+    summary = recent.json["entries"][0]
+    assert set(summary) == {
+        "id",
+        "title",
+        "author",
+        "entry_date",
+        "created_at",
+        "updated_at",
+        "reply_count",
+        "last_activity_at",
+    }
+    assert "content" not in summary
+    assert "replies" not in summary
+    assert "marks" not in summary
+    assert recent.json["pagination"] == {
+        "total": 1,
+        "count": 1,
+        "page": 1,
+        "page_size": 5,
+        "total_pages": 1,
+        "has_more": False,
+    }
 
     reply = client.post(
         f"/api/diary/entries/{entry_id}/replies",
@@ -149,6 +173,148 @@ def test_date_query_single_day_and_range(client, repo, api_headers):
     )
     assert span.status_code == 200
     assert {item["title"] for item in span.json["entries"]} == {"22", "23"}
+    assert all("content" not in item for item in one.json["entries"])
+    assert all("content" not in item for item in span.json["entries"])
+    assert one.json["pagination"]["total"] == 1
+    assert span.json["pagination"]["total"] == 2
+
+
+def test_action_list_pagination_is_complete_without_duplicates(client, repo, api_headers):
+    expected_ids = set()
+    for index in range(12):
+        entry = repo.create_entry(
+            author="xiaxia",
+            title=f"同日-{index}",
+            content=f"正文-{index}",
+            entry_date=date(2026, 8, 27),
+        )
+        expected_ids.add(str(entry["id"]))
+
+    seen_ids = []
+    expected_counts = [5, 5, 2]
+    for page, expected_count in enumerate(expected_counts, start=1):
+        response = client.get(
+            f"/api/diary/by-date?date=2026-08-27&page={page}&page_size=5",
+            headers=api_headers,
+        )
+        assert response.status_code == 200
+        assert response.json["count"] == expected_count
+        assert len(response.json["entries"]) == expected_count
+        assert response.json["pagination"] == {
+            "total": 12,
+            "count": expected_count,
+            "page": page,
+            "page_size": 5,
+            "total_pages": 3,
+            "has_more": page < 3,
+        }
+        seen_ids.extend(item["id"] for item in response.json["entries"])
+
+    assert set(seen_ids) == expected_ids
+    assert len(seen_ids) == len(set(seen_ids)) == 12
+
+
+def test_action_list_total_respects_author_and_date_filters(client, repo, api_headers):
+    for index in range(7):
+        repo.create_entry(
+            author="xiaxia",
+            title=f"夏夏-{index}",
+            content="x",
+            entry_date=date(2026, 8, 27),
+        )
+    for index in range(3):
+        repo.create_entry(
+            author="user",
+            title=f"用户-{index}",
+            content="u",
+            entry_date=date(2026, 8, 27),
+        )
+    repo.create_entry(
+        author="xiaxia",
+        title="范围内另一天",
+        content="r",
+        entry_date=date(2026, 8, 26),
+    )
+    repo.create_entry(
+        author="xiaxia",
+        title="范围外",
+        content="o",
+        entry_date=date(2026, 8, 25),
+    )
+
+    xiaxia_day = client.get(
+        "/api/diary/by-date?date=2026-08-27&author=xiaxia&page_size=5",
+        headers=api_headers,
+    )
+    assert xiaxia_day.status_code == 200
+    assert xiaxia_day.json["pagination"]["total"] == 7
+    assert xiaxia_day.json["pagination"]["has_more"] is True
+    assert {item["author"] for item in xiaxia_day.json["entries"]} == {"xiaxia"}
+
+    date_range = client.get(
+        "/api/diary/by-date?start_date=2026-08-26&end_date=2026-08-27"
+        "&author=xiaxia&page_size=20",
+        headers=api_headers,
+    )
+    assert date_range.status_code == 200
+    assert date_range.json["pagination"]["total"] == 8
+    assert date_range.json["count"] == 8
+
+    recent = client.get(
+        "/api/diary/recent?author=user&page_size=2", headers=api_headers
+    )
+    assert recent.status_code == 200
+    assert recent.json["pagination"]["total"] == 3
+    assert recent.json["pagination"]["has_more"] is True
+    assert {item["author"] for item in recent.json["entries"]} == {"user"}
+
+
+def test_long_entries_keep_lists_light_but_detail_complete(client, repo, api_headers):
+    long_content = "很长的一页。" * 10_000
+    entry = repo.create_entry(
+        author="xiaxia",
+        title="长日记",
+        content=long_content,
+        entry_date=date(2026, 8, 27),
+    )
+    repo.create_reply(entry_id=entry["id"], author="user", content="完整回复")
+
+    listing = client.get(
+        "/api/diary/by-date?date=2026-08-27&page_size=5", headers=api_headers
+    )
+    assert listing.status_code == 200
+    assert "content" not in listing.json["entries"][0]
+    assert "replies" not in listing.json["entries"][0]
+    assert len(listing.data) < 5_000
+
+    detail = client.get(f"/api/diary/entries/{entry['id']}", headers=api_headers)
+    assert detail.status_code == 200
+    assert detail.json["entry"]["content"] == long_content
+    assert detail.json["entry"]["replies"][0]["content"] == "完整回复"
+
+
+def test_database_summary_select_never_selects_heavy_fields():
+    from database import ENTRY_SUMMARY_SELECT
+
+    normalized = " ".join(ENTRY_SUMMARY_SELECT.lower().split())
+    assert "e.content" not in normalized
+    assert "jsonb_agg" not in normalized
+    assert "diary_replies r" in normalized
+
+
+def test_legacy_limit_is_a_bounded_page_size_alias(client, repo, api_headers):
+    for index in range(25):
+        repo.create_entry(
+            author="xiaxia",
+            title=f"兼容-{index}",
+            content="正文",
+            entry_date=date(2026, 8, 27),
+        )
+    response = client.get("/api/diary/recent?limit=100", headers=api_headers)
+    assert response.status_code == 200
+    assert response.json["pagination"]["page_size"] == 20
+    assert response.json["pagination"]["total"] == 25
+    assert response.json["pagination"]["has_more"] is True
 
 
 def test_web_archive_by_month_and_exact_date(logged_in_client, repo):
@@ -455,6 +621,103 @@ def test_xiaxia_entry_cannot_be_trashed_on_web(logged_in_client, repo, csrf_form
     assert entry["id"] in repo.entries
 
 
+def test_action_delete_only_soft_deletes_xiaxia_entries(client, repo, api_headers):
+    xiaxia_entry = repo.create_entry(
+        author="xiaxia", title="重复页", content="重复正文", entry_date=date(2026, 8, 27)
+    )
+    user_entry = repo.create_entry(
+        author="user", title="用户页", content="不能删", entry_date=date(2026, 8, 27)
+    )
+    repo.create_reply(entry_id=xiaxia_entry["id"], author="user", content="保留历史")
+
+    assert client.delete(f"/api/diary/entries/{xiaxia_entry['id']}").status_code == 401
+    assert client.delete(
+        f"/api/diary/entries/{user_entry['id']}", headers=api_headers
+    ).status_code == 403
+    assert repo.entries[user_entry["id"]]["deleted_at"] is None
+
+    deleted = client.delete(
+        f"/api/diary/entries/{xiaxia_entry['id']}", headers=api_headers
+    )
+    assert deleted.status_code == 200
+    assert deleted.json == {"deleted": True, "entry_id": str(xiaxia_entry["id"])}
+    assert repo.entries[xiaxia_entry["id"]]["deleted_at"] is not None
+    assert repo.entries[xiaxia_entry["id"]]["deleted_by"] == "xiaxia"
+    assert repo.replies[xiaxia_entry["id"]][0]["content"] == "保留历史"
+    assert client.get(
+        f"/api/diary/entries/{xiaxia_entry['id']}", headers=api_headers
+    ).status_code == 404
+    listing = client.get(
+        "/api/diary/by-date?date=2026-08-27", headers=api_headers
+    )
+    assert {item["id"] for item in listing.json["entries"]} == {str(user_entry["id"])}
+
+
+def test_action_delete_rejects_invalid_and_missing_ids(client, api_headers):
+    invalid = client.delete("/api/diary/entries/not-a-uuid", headers=api_headers)
+    assert invalid.status_code == 400
+    assert invalid.json["error"] == "invalid_request"
+
+    missing = client.delete(f"/api/diary/entries/{uuid4()}", headers=api_headers)
+    assert missing.status_code == 404
+    assert missing.json["error"] == "not_found"
+
+
+def test_v12_six_entry_readthrough_and_duplicate_cleanup(client, repo, api_headers):
+    expected_content = {}
+    for index in range(6):
+        content = f"第 {index + 1} 篇完整正文\n" + ("长正文。" * 5_000)
+        entry = repo.create_entry(
+            author="xiaxia",
+            title=f"验收-{index + 1}",
+            content=content,
+            entry_date=date(2026, 8, 27),
+        )
+        expected_content[str(entry["id"])] = content
+
+    discovered_ids = []
+    page = 1
+    while True:
+        response = client.get(
+            f"/api/diary/by-date?date=2026-08-27&author=xiaxia"
+            f"&page={page}&page_size=2",
+            headers=api_headers,
+        )
+        assert response.status_code == 200
+        assert response.json["pagination"]["total"] == 6
+        discovered_ids.extend(item["id"] for item in response.json["entries"])
+        if not response.json["pagination"]["has_more"]:
+            break
+        page += 1
+
+    assert page == 3
+    assert set(discovered_ids) == set(expected_content)
+    for entry_id in discovered_ids:
+        detail = client.get(f"/api/diary/entries/{entry_id}", headers=api_headers)
+        assert detail.status_code == 200
+        assert detail.json["entry"]["content"] == expected_content[entry_id]
+
+    duplicate = repo.create_entry(
+        author="xiaxia",
+        title="验收-1（重复）",
+        content=next(iter(expected_content.values())),
+        entry_date=date(2026, 8, 27),
+    )
+    before = client.get(
+        "/api/diary/by-date?date=2026-08-27&author=xiaxia&page_size=2",
+        headers=api_headers,
+    )
+    assert before.json["pagination"]["total"] == 7
+    assert client.delete(
+        f"/api/diary/entries/{duplicate['id']}", headers=api_headers
+    ).status_code == 200
+    after = client.get(
+        "/api/diary/by-date?date=2026-08-27&author=xiaxia&page_size=2",
+        headers=api_headers,
+    )
+    assert after.json["pagination"]["total"] == 6
+
+
 def test_openapi_contract_security_and_flask_route_consistency(app):
     from pathlib import Path
     import yaml
@@ -501,7 +764,7 @@ def test_openapi_contract_security_and_flask_route_consistency(app):
                 for parameter in operation.get("parameters", []):
                     if "$ref" not in parameter:
                         assert len(parameter.get("description", "")) <= 700
-    assert len(operation_ids) == len(set(operation_ids)) == 8
+    assert len(operation_ids) == len(set(operation_ids)) == 9
     assert {
         "getRecentDiaryEntries",
         "getDiaryEntry",
@@ -510,11 +773,19 @@ def test_openapi_contract_security_and_flask_route_consistency(app):
         "replyToDiaryEntry",
         "getSharedDiaryContext",
     }.issubset(operation_ids)
-    assert {"addDiaryMark", "removeDiaryMark"}.issubset(operation_ids)
+    assert {"addDiaryMark", "removeDiaryMark", "deleteDiaryEntry"}.issubset(
+        operation_ids
+    )
     assert spec["paths"]["/api/diary/entries/{entry_id}/marks"]["post"][
         "x-openai-isConsequential"
     ] is True
-    assert "delete" not in spec["paths"]["/api/diary/entries/{entry_id}"]
+    assert spec["paths"]["/api/diary/entries/{entry_id}"]["delete"][
+        "x-openai-isConsequential"
+    ] is True
+    summary = spec["components"]["schemas"]["DiaryEntrySummary"]
+    assert "content" not in summary["properties"]
+    assert "replies" not in summary["properties"]
+    assert "marks" not in summary["properties"]
 
     spec_routes = {
         (method.upper(), path)
@@ -558,3 +829,17 @@ def test_v11_migration_contains_only_required_additions():
     assert "add column if not exists deleted_by" in sql
     assert "create table if not exists public.diary_marks" in sql
     assert "unique (entry_id, author, mark_type)" in sql
+
+
+def test_v12_migration_adds_stable_active_pagination_indexes():
+    from pathlib import Path
+
+    sql = (
+        Path(__file__).parents[1]
+        / "migrations"
+        / "002_v1_2_action_pagination_indexes.sql"
+    ).read_text().lower()
+    assert "entry_date desc, created_at desc, id desc" in sql
+    assert "author, entry_date desc, created_at desc, id desc" in sql
+    assert sql.count("where deleted_at is null") == 2
+    assert "alter table" not in sql

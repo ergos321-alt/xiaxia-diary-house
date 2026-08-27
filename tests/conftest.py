@@ -79,6 +79,12 @@ class FakeRepository:
         result["marks"] = deepcopy(self.marks[entry_id])
         return result
 
+    def get_entry_author(self, entry_id):
+        entry = self.entries.get(entry_id)
+        if not entry or entry["deleted_at"] is not None:
+            return None
+        return entry["author"]
+
     def list_entries(self, *, limit=50, offset=0, author=None, start_date=None, end_date=None):
         entries = [item for item in self.entries.values() if item["deleted_at"] is None]
         if author:
@@ -87,8 +93,43 @@ class FakeRepository:
             entries = [item for item in entries if item["entry_date"] >= start_date]
         if end_date:
             entries = [item for item in entries if item["entry_date"] <= end_date]
-        entries.sort(key=lambda item: (item["entry_date"], item["created_at"]), reverse=True)
+        entries.sort(
+            key=lambda item: (item["entry_date"], item["created_at"], item["id"]),
+            reverse=True,
+        )
         return deepcopy(entries[offset:offset + limit])
+
+    def list_entry_summaries(
+        self, *, limit, offset=0, author=None, start_date=None, end_date=None
+    ):
+        entries = self.list_entries(
+            limit=limit,
+            offset=offset,
+            author=author,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        fields = (
+            "id",
+            "title",
+            "author",
+            "entry_date",
+            "created_at",
+            "updated_at",
+            "reply_count",
+            "last_activity_at",
+        )
+        return [{field: entry[field] for field in fields} for entry in entries]
+
+    def count_entries(self, *, author=None, start_date=None, end_date=None):
+        entries = [item for item in self.entries.values() if item["deleted_at"] is None]
+        if author:
+            entries = [item for item in entries if item["author"] == author]
+        if start_date:
+            entries = [item for item in entries if item["entry_date"] >= start_date]
+        if end_date:
+            entries = [item for item in entries if item["entry_date"] <= end_date]
+        return len(entries)
 
     def list_deleted_entries(self, *, limit=100):
         entries = [
@@ -175,6 +216,14 @@ class FakeRepository:
             return False
         now = datetime.now(timezone.utc)
         entry.update(deleted_at=now, deleted_by="user", updated_at=now)
+        return True
+
+    def trash_xiaxia_entry(self, entry_id):
+        entry = self.entries.get(entry_id)
+        if not entry or entry["author"] != "xiaxia" or entry["deleted_at"] is not None:
+            return False
+        now = datetime.now(timezone.utc)
+        entry.update(deleted_at=now, deleted_by="xiaxia", updated_at=now)
         return True
 
     def restore_user_entry(self, entry_id):

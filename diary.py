@@ -17,6 +17,8 @@ AUTHORS = {"user", "xiaxia"}
 MARK_TYPES = {"leaf"}
 MAX_TITLE_LENGTH = 200
 MAX_CONTENT_LENGTH = 100_000
+ACTION_DEFAULT_PAGE_SIZE = 10
+ACTION_MAX_PAGE_SIZE = 20
 
 
 class InputError(ValueError):
@@ -158,6 +160,49 @@ def _json_body(*, allowed_fields: set[str]) -> dict[str, Any]:
     if unexpected:
         raise InputError(f"Unexpected request field(s): {', '.join(unexpected)}.")
     return data
+
+
+def _action_pagination() -> tuple[int, int]:
+    """Parse Action list pagination while accepting the old limit as an alias."""
+    try:
+        page = int(request.args.get("page", "1"))
+    except ValueError as exc:
+        raise InputError("page must be an integer.") from exc
+    if page < 1:
+        raise InputError("page must be at least 1.")
+
+    page_size_raw = request.args.get("page_size")
+    legacy_limit = request.args.get("limit") if page_size_raw is None else None
+    try:
+        if page_size_raw is not None:
+            page_size = int(page_size_raw)
+        elif legacy_limit is not None:
+            page_size = min(int(legacy_limit), ACTION_MAX_PAGE_SIZE)
+        else:
+            page_size = ACTION_DEFAULT_PAGE_SIZE
+    except ValueError as exc:
+        field = "page_size" if page_size_raw is not None else "limit"
+        raise InputError(f"{field} must be an integer.") from exc
+    if page_size < 1:
+        field = "page_size" if page_size_raw is not None else "limit"
+        raise InputError(f"{field} must be at least 1.")
+    if page_size > ACTION_MAX_PAGE_SIZE:
+        raise InputError(
+            f"page_size must not exceed {ACTION_MAX_PAGE_SIZE}."
+        )
+    return page, page_size
+
+
+def _pagination_payload(*, total: int, page: int, page_size: int, count: int) -> dict[str, Any]:
+    total_pages = (total + page_size - 1) // page_size
+    return {
+        "total": total,
+        "count": count,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "has_more": page * page_size < total,
+    }
 
 
 @web.get("/diary")
@@ -495,17 +540,26 @@ def permanently_delete_entry(entry_id: str) -> Any:
 @api_token_required
 def api_recent() -> Any:
     try:
-        limit = min(max(int(request.args.get("limit", "10")), 1), 50)
-    except ValueError:
-        return jsonify({"error": "invalid_request", "message": "limit must be an integer."}), 400
-    author = request.args.get("author")
-    if author is not None:
-        try:
+        page, page_size = _action_pagination()
+        author = request.args.get("author")
+        if author is not None:
             author = _validate_author(author)
-        except InputError as exc:
-            return jsonify({"error": "invalid_request", "message": str(exc)}), 400
-    entries = _repo().list_entries(limit=limit, author=author)
-    return jsonify({"entries": _json_value(entries), "count": len(entries)})
+    except InputError as exc:
+        return jsonify({"error": "invalid_request", "message": str(exc)}), 400
+    total = _repo().count_entries(author=author)
+    entries = _repo().list_entry_summaries(
+        limit=page_size, offset=(page - 1) * page_size, author=author
+    )
+    count = len(entries)
+    return jsonify(
+        {
+            "entries": _json_value(entries),
+            "count": count,
+            "pagination": _pagination_payload(
+                total=total, page=page, page_size=page_size, count=count
+            ),
+        }
+    )
 
 
 @api.get("/entries/<entry_id>")
@@ -518,6 +572,31 @@ def api_entry(entry_id: str) -> Any:
     if entry is None:
         return jsonify({"error": "not_found", "message": "Diary entry not found."}), 404
     return jsonify({"entry": _json_value(entry)})
+
+
+@api.delete("/entries/<entry_id>")
+@api_token_required
+def api_delete_entry(entry_id: str) -> Any:
+    try:
+        entry_uuid = _parse_uuid(entry_id)
+    except InputError as exc:
+        return jsonify({"error": "invalid_request", "message": str(exc)}), 400
+    author = _repo().get_entry_author(entry_uuid)
+    if author is None:
+        return jsonify({"error": "not_found", "message": "Diary entry not found."}), 404
+    if author != "xiaxia":
+        return (
+            jsonify(
+                {
+                    "error": "forbidden",
+                    "message": "The Action can delete only entries authored by xiaxia.",
+                }
+            ),
+            403,
+        )
+    if not _repo().trash_xiaxia_entry(entry_uuid):
+        return jsonify({"error": "not_found", "message": "Diary entry not found."}), 404
+    return jsonify({"deleted": True, "entry_id": str(entry_uuid)})
 
 
 @api.get("/by-date")
@@ -543,17 +622,26 @@ def api_by_date() -> Any:
         author = request.args.get("author")
         if author is not None:
             author = _validate_author(author)
-        limit = min(max(int(request.args.get("limit", "100")), 1), 200)
-    except (InputError, ValueError) as exc:
-        message = str(exc) if str(exc) else "limit must be an integer."
-        return jsonify({"error": "invalid_request", "message": message}), 400
-    entries = _repo().list_entries(
-        limit=limit, author=author, start_date=start_date, end_date=end_date
+        page, page_size = _action_pagination()
+    except InputError as exc:
+        return jsonify({"error": "invalid_request", "message": str(exc)}), 400
+    filters = {
+        "author": author,
+        "start_date": start_date,
+        "end_date": end_date,
+    }
+    total = _repo().count_entries(**filters)
+    entries = _repo().list_entry_summaries(
+        limit=page_size, offset=(page - 1) * page_size, **filters
     )
+    count = len(entries)
     return jsonify(
         {
             "entries": _json_value(entries),
-            "count": len(entries),
+            "count": count,
+            "pagination": _pagination_payload(
+                total=total, page=page, page_size=page_size, count=count
+            ),
             "range": {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
         }
     )

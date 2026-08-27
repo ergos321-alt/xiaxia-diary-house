@@ -43,6 +43,12 @@ create index if not exists diary_replies_created_idx
     on public.diary_replies (created_at desc);
 create index if not exists diary_entries_deleted_idx
     on public.diary_entries (deleted_at desc) where deleted_at is not null;
+create index if not exists diary_entries_active_date_created_id_idx
+    on public.diary_entries (entry_date desc, created_at desc, id desc)
+    where deleted_at is null;
+create index if not exists diary_entries_active_author_date_created_id_idx
+    on public.diary_entries (author, entry_date desc, created_at desc, id desc)
+    where deleted_at is null;
 create index if not exists diary_marks_entry_created_idx
     on public.diary_marks (entry_id, created_at asc);
 

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Xiaxia Diary House Action API
-  version: 1.1.0
+  version: 1.2.0
   description: >-
     Private read/write access to the shared diary of the user and Lin Xiaxia.
     The API stores text supplied by the caller and never generates diary content.
@@ -14,18 +14,21 @@ paths:
   /api/diary/recent:
     get:
       operationId: getRecentDiaryEntries
-      summary: Read the most recent diary entries
-      description: Returns bounded recent entries in reverse chronological order, including their content.
+      summary: List recent diary entries without their full text
+      description: >-
+        Use this lightweight directory first to learn which entries exist and how many match.
+        Follow pagination until has_more is false, then call getDiaryEntry for each entry_id.
       parameters:
-        - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/AuthorFilter"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
       responses:
         "200":
-          description: Recent diary entries
+          description: Lightweight recent-entry directory and complete pagination metadata
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EntryListResponse"
+                $ref: "#/components/schemas/LightweightEntryListResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -34,6 +37,9 @@ paths:
     get:
       operationId: getDiaryEntry
       summary: Read one complete diary entry and all replies
+      description: >-
+        Use an entry_id returned by a list operation to read the complete diary text,
+        replies, and marks. This response is not silently truncated.
       parameters:
         - $ref: "#/components/parameters/EntryId"
       responses:
@@ -53,13 +59,37 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteDiaryEntry
+      summary: Soft-delete one diary entry authored by Xiaxia
+      description: >-
+        Deletes only an active entry whose stored author is xiaxia. User-authored entries
+        are forbidden, and the caller cannot supply or override an author.
+      x-openai-isConsequential: true
+      parameters:
+        - $ref: "#/components/parameters/EntryId"
+      responses:
+        "200":
+          description: Xiaxia entry moved out of active diary lists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteEntryResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /api/diary/by-date:
     get:
       operationId: getDiaryEntriesByDate
-      summary: Read diary entries from one day or a date range
+      summary: List diary entries from one day or date range without full text
       description: >-
-        Supply date by itself, or both start_date and end_date. Do not combine the two forms.
-        A range can cover at most 366 days.
+        Supply date alone, or start_date and end_date together. This is a lightweight directory:
+        use total and pagination to enumerate every ID, then call getDiaryEntry for full text.
       parameters:
         - name: date
           in: query
@@ -83,31 +113,15 @@ paths:
             type: string
             format: date
         - $ref: "#/components/parameters/AuthorFilter"
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 200
-            default: 100
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
       responses:
         "200":
           description: Entries within the requested date range
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: "#/components/schemas/EntryListResponse"
-                  - type: object
-                    required: [range]
-                    properties:
-                      range:
-                        type: object
-                        required: [start_date, end_date]
-                        properties:
-                          start_date: {type: string, format: date}
-                          end_date: {type: string, format: date}
+                $ref: "#/components/schemas/DateEntryListResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -283,14 +297,24 @@ components:
       schema:
         type: string
         format: uuid
-    Limit:
-      name: limit
+    Page:
+      name: page
       in: query
       required: false
+      description: One-based page number.
       schema:
         type: integer
         minimum: 1
-        maximum: 50
+        default: 1
+    PageSize:
+      name: page_size
+      in: query
+      required: false
+      description: Number of lightweight directory entries per page.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 20
         default: 10
     AuthorFilter:
       name: author
@@ -314,6 +338,12 @@ components:
             $ref: "#/components/schemas/Error"
     Unauthorized:
       description: Missing or invalid Bearer token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: The authenticated Action is not allowed to mutate this entry
       content:
         application/json:
           schema:
@@ -354,6 +384,22 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DiaryMark"
+    DiaryEntrySummary:
+      type: object
+      required: [id, author, entry_date, created_at, updated_at, reply_count, last_activity_at]
+      properties:
+        id: {type: string, format: uuid}
+        author: {$ref: "#/components/schemas/Author"}
+        title:
+          anyOf:
+            - type: string
+              maxLength: 200
+            - type: "null"
+        entry_date: {type: string, format: date}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        reply_count: {type: integer, minimum: 0}
+        last_activity_at: {type: string, format: date-time}
     DiaryEntryWithReplies:
       allOf:
         - $ref: "#/components/schemas/DiaryEntry"
@@ -426,15 +472,50 @@ components:
         mark:
           $ref: "#/components/schemas/DiaryMark"
         created: {type: boolean}
-    EntryListResponse:
+    Pagination:
       type: object
-      required: [entries, count]
+      required: [total, count, page, page_size, total_pages, has_more]
+      properties:
+        total: {type: integer, minimum: 0}
+        count: {type: integer, minimum: 0}
+        page: {type: integer, minimum: 1}
+        page_size: {type: integer, minimum: 1, maximum: 20}
+        total_pages: {type: integer, minimum: 0}
+        has_more: {type: boolean}
+    LightweightEntryListResponse:
+      type: object
+      required: [entries, count, pagination]
       properties:
         entries:
           type: array
           items:
-            $ref: "#/components/schemas/DiaryEntry"
+            $ref: "#/components/schemas/DiaryEntrySummary"
         count: {type: integer, minimum: 0}
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+    DateEntryListResponse:
+      type: object
+      required: [entries, count, pagination, range]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/DiaryEntrySummary"
+        count: {type: integer, minimum: 0}
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+        range:
+          type: object
+          required: [start_date, end_date]
+          properties:
+            start_date: {type: string, format: date}
+            end_date: {type: string, format: date}
+    DeleteEntryResponse:
+      type: object
+      required: [deleted, entry_id]
+      properties:
+        deleted: {type: boolean}
+        entry_id: {type: string, format: uuid}
     ContextResponse:
       type: object
       required: [generated_at, timezone, recent_user_entries, recent_xiaxia_entries, recent_replies]

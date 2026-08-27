@@ -42,6 +42,26 @@ ENTRY_SELECT = """
       FROM diary_entries e
 """
 
+ENTRY_SUMMARY_SELECT = """
+    SELECT e.id, e.author, e.title, e.entry_date,
+           e.created_at, e.updated_at,
+           (SELECT COUNT(*)::int
+              FROM diary_replies r
+             WHERE r.entry_id = e.id) AS reply_count,
+           GREATEST(
+               e.updated_at,
+               COALESCE(
+                   (SELECT MAX(r.updated_at) FROM diary_replies r WHERE r.entry_id = e.id),
+                   e.updated_at
+               ),
+               COALESCE(
+                   (SELECT MAX(m.created_at) FROM diary_marks m WHERE m.entry_id = e.id),
+                   e.updated_at
+               )
+           ) AS last_activity_at
+      FROM diary_entries e
+"""
+
 
 class Database:
     """Small PostgreSQL repository. It stores facts and never generates diary text."""
@@ -64,15 +84,13 @@ class Database:
         with self.pool.connection() as conn:
             return conn.execute("SELECT 1").fetchone() is not None
 
-    def list_entries(
-        self,
+    @staticmethod
+    def _entry_filters(
         *,
-        limit: int = 50,
-        offset: int = 0,
         author: str | None = None,
         start_date: date | None = None,
         end_date: date | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[str], list[Any]]:
         conditions = ["e.deleted_at IS NULL"]
         params: list[Any] = []
         if author:
@@ -84,15 +102,72 @@ class Database:
         if end_date:
             conditions.append("e.entry_date <= %s")
             params.append(end_date)
+        return conditions, params
+
+    def list_entries(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        author: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[dict[str, Any]]:
+        conditions, params = self._entry_filters(
+            author=author, start_date=start_date, end_date=end_date
+        )
         params.extend((limit, offset))
         query = f"""
             {ENTRY_SELECT}
             WHERE {' AND '.join(conditions)}
-            ORDER BY e.entry_date DESC, e.created_at DESC
+            ORDER BY e.entry_date DESC, e.created_at DESC, e.id DESC
             LIMIT %s OFFSET %s
         """
         with self.pool.connection() as conn:
             return list(conn.execute(query, params).fetchall())
+
+    def list_entry_summaries(
+        self,
+        *,
+        limit: int,
+        offset: int = 0,
+        author: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return lightweight list rows without diary content, replies, or marks."""
+        conditions, params = self._entry_filters(
+            author=author, start_date=start_date, end_date=end_date
+        )
+        params.extend((limit, offset))
+        query = f"""
+            {ENTRY_SUMMARY_SELECT}
+            WHERE {' AND '.join(conditions)}
+            ORDER BY e.entry_date DESC, e.created_at DESC, e.id DESC
+            LIMIT %s OFFSET %s
+        """
+        with self.pool.connection() as conn:
+            return list(conn.execute(query, params).fetchall())
+
+    def count_entries(
+        self,
+        *,
+        author: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> int:
+        """Count active entries after applying the same filters as list queries."""
+        conditions, params = self._entry_filters(
+            author=author, start_date=start_date, end_date=end_date
+        )
+        query = f"""
+            SELECT COUNT(*)::int AS total
+            FROM diary_entries e
+            WHERE {' AND '.join(conditions)}
+        """
+        with self.pool.connection() as conn:
+            row = conn.execute(query, params).fetchone()
+            return int(row["total"])
 
     def list_deleted_entries(self, *, limit: int = 100) -> list[dict[str, Any]]:
         query = f"""
@@ -179,6 +254,18 @@ class Database:
                 ).fetchall()
             )
             return entry
+
+    def get_entry_author(self, entry_id: UUID) -> str | None:
+        with self.pool.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT author
+                FROM diary_entries
+                WHERE id = %s AND deleted_at IS NULL
+                """,
+                (entry_id,),
+            ).fetchone()
+            return str(row["author"]) if row else None
 
     def create_entry(
         self, *, author: str, title: str | None, content: str, entry_date: date
@@ -312,6 +399,20 @@ class Database:
                 UPDATE diary_entries
                 SET deleted_at = now(), deleted_by = 'user', updated_at = now()
                 WHERE id = %s AND author = 'user' AND deleted_at IS NULL
+                RETURNING id
+                """,
+                (entry_id,),
+            ).fetchone()
+            conn.commit()
+            return row is not None
+
+    def trash_xiaxia_entry(self, entry_id: UUID) -> bool:
+        with self.pool.connection() as conn:
+            row = conn.execute(
+                """
+                UPDATE diary_entries
+                SET deleted_at = now(), deleted_by = 'xiaxia', updated_at = now()
+                WHERE id = %s AND author = 'xiaxia' AND deleted_at IS NULL
                 RETURNING id
                 """,
                 (entry_id,),
