@@ -1,2 +1,2 @@
-web: gunicorn "app:create_app()" --bind 0.0.0:$PORT --workers 2 --threads 4 --timeout 60 --access-logfile -
+web: uvicorn mcp_app:app --host 0.0.0.0 --port ${PORT:-10000} --workers 2 --proxy-headers --forwarded-allow-ips="*"
 

@@ -139,8 +139,10 @@ python -m pytest -W error --cov=app --cov=auth --cov=database --cov=diary --cov-
 现有 Service 按上面的升级顺序发布。全新部署可使用 `render.yaml`，或手工配置：
 
 - Build Command：`pip install -r requirements.txt`
-- Start Command：`gunicorn "app:create_app()" --bind 0.0.0:$PORT --workers 2 --threads 4 --timeout 60 --access-logfile -`
+- Start Command：`uvicorn mcp_app:app --host 0.0.0.0 --port $PORT --workers 2 --proxy-headers --forwarded-allow-ips="*"`
 - Health Check：`/healthz`
+
+此 Start Command 同时提供原 Flask 网页与 Action API，以及 Streamable HTTP MCP `/mcp`。MCP tools 只调用现有 `/api/diary/*` 路由，并复用 `DIARY_API_TOKEN`；没有新增数据库、表或业务逻辑。公网 `/mcp` 入站认证暂缓至统一 MCP Security Pass；部署前按安全计划处理此项。
 
 部署后先验证：
 

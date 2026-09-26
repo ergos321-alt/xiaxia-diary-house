@@ -4,7 +4,7 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn "app:create_app()" --bind 0.0.0:$PORT --workers 2 --threads 4 --timeout 60 --access-logfile -
+    startCommand: uvicorn mcp_app:app --host 0.0.0.0 --port $PORT --workers 2 --proxy-headers --forwarded-allow-ips="*"
     healthCheckPath: /healthz
     autoDeploy: false
     envVars:
