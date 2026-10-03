@@ -1,8 +1,10 @@
 # Xiaxia Diary House V1.2
 
-Xiaxia Diary House 是用户与林知夏长期共用的一本私人日记。用户通过手机网页写日记、在页边补字；林知夏在现有 Custom GPT 中形成自己的文字，再通过 Action 读取或写入同一个 Supabase PostgreSQL 数据库。
+Xiaxia Diary House 是用户与林知夏长期共用的一本私人日记。用户通过手机网页写日记、在页边补字；服务端将日记安全保存到 Supabase PostgreSQL。
 
-服务器只保存与返回双方明确写下的事实数据，不调用模型，不生成、改写或模拟林知夏的内容。日记不属于某个聊天窗口；换到新的 Custom GPT 会话后，仍可通过 Action 读取历史。
+服务器只保存与返回双方明确写下的事实数据，不调用模型，不生成、改写或模拟林知夏的内容。当前 ChatGPT 入口为普通 ChatGPT → Xiaxia Plugin → Diary MCP → 本服务。
+
+下方 Custom GPT Action 配置和兼容说明是历史文档，不代表当前 ChatGPT 入口。
 
 V1.2 基于已验收 V1.1 做一次 Action 阅读可靠性增量修复。Web、身份模型、正文生成边界、回复、标记和用户废纸篓语义保持不变；列表 Action 改为轻量目录和可验证分页，单篇接口继续返回完整正文，并新增仅能软删除 `author=xiaxia` 日记的 Action。
 
@@ -154,7 +156,7 @@ bash scripts/smoke_action.sh
 
 该脚本验证分页目录含 `pagination.total/has_more`、summary 不含正文，并在有日记时按首个 ID 回归单篇完整读取。Render 重启不会导致日记丢失，因为数据位于 Supabase PostgreSQL，不在 Render 本地磁盘。
 
-## Custom GPT Action
+## Historical Custom GPT Action
 
 `openapi.yaml` 使用 OpenAPI 3.1、单一静态 HTTPS server URL、无 server variables，也不使用 `nullable`。可空标题以保守的 `anyOf: [string, null]` 表示。所有 operationId 唯一，并由自动化测试与 Flask `/api/diary/*` 路由逐项核对。
 
